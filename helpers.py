@@ -440,9 +440,84 @@ def get_password_policy(snapshot):
 def get_installed_software(snapshot):
     software = []
     try:
-        # TODO Milestone 4: walk the Uninstall hive and append a dict
-        # for each program with a DisplayName.
-        pass
+        # Open the parent registry key that contains all installed software entries.
+        # This key has one subkey per installed program.
+        parent_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")
+
+        # Use EnumKey to walk all subkeys. This is a loop counter pattern, not a for loop.
+        # We start at i=0 and keep incrementing until EnumKey raises OSError (no more subkeys).
+        i = 0
+        while True:
+            try:
+                # EnumKey returns the name of the subkey at index i (e.g. "{12345-ABC-67890}").
+                # It does NOT return the full path — just the subkey name.
+                subkey_name = winreg.EnumKey(parent_key, i)
+
+                # Build the full registry path by combining the parent path with the subkey name.
+                # The backslash is a literal separator in registry paths (hence the raw string r"...").
+                # NOTE: You could also pass subkey_name to get_registry_value(), but here
+                # we build the path explicitly for clarity about where the data comes from.
+                full_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" + "\\" + subkey_name
+
+                # Try to read DisplayName from this subkey. If it doesn't exist, get_registry_value returns None.
+                # DisplayName is the human-readable program name (e.g. "Microsoft Visual Studio Code").
+                display_name = get_registry_value(winreg.HKEY_LOCAL_MACHINE, full_path, "DisplayName")
+
+                # SKIP this subkey entirely if it has no DisplayName.
+                # Many registry entries under Uninstall are components or updates without a DisplayName.
+                # Skipping them keeps your software list clean and focused on actual programs.
+                if display_name is None:
+                    i += 1
+                    continue
+
+                # Read DisplayVersion (string, e.g. "1.89.1"). May be None if not present.
+                display_version = get_registry_value(winreg.HKEY_LOCAL_MACHINE, full_path, "DisplayVersion")
+
+                # Read Publisher (string, e.g. "Microsoft Corporation"). May be None if not present.
+                publisher = get_registry_value(winreg.HKEY_LOCAL_MACHINE, full_path, "Publisher")
+
+                # Read InstallDate (string in YYYYMMDD format like "20250902"). May be None if not present.
+                install_date_raw = get_registry_value(winreg.HKEY_LOCAL_MACHINE, full_path, "InstallDate")
+
+                # Convert InstallDate from YYYYMMDD format to ISO format (YYYY-MM-DD).
+                # Only convert if the value exists; if it's None, leave it as None.
+                install_date_iso = None
+                if install_date_raw is not None:
+                    try:
+                        # Parse the YYYYMMDD string into a date object using strptime.
+                        # "%Y%m%d" tells strptime how to interpret the input format.
+                        dt = datetime.datetime.strptime(install_date_raw, "%Y%m%d")
+                        # Convert the datetime object to ISO format (YYYY-MM-DD) and extract just the date part.
+                        install_date_iso = dt.date().isoformat()
+                    except ValueError:
+                        # If the string doesn't match YYYYMMDD format, leave it as None.
+                        # NOTE: You could also store the raw string or a warning instead — this
+                        # is a deliberate choice to be strict about date format.
+                        install_date_iso = None
+
+                # Build a dict for this software entry with the 4 fields.
+                entry = {
+                    "display_name": display_name,
+                    "display_version": display_version,
+                    "publisher": publisher,
+                    "install_date": install_date_iso
+                }
+
+                # Append this entry to the software list.
+                software.append(entry)
+
+                # Increment i to move to the next subkey on the next loop iteration.
+                i += 1
+
+            except OSError:
+                # OSError is raised when winreg.EnumKey(key, i) is called with an index
+                # that's out of bounds (i >= number of subkeys). This is the normal way to detect
+                # the end of the subkey list — it's not an error to log, just the loop terminator.
+                break
+
+        # Close the parent key to release the registry handle.
+        winreg.CloseKey(parent_key)
+
     except Exception as e:
         add_warning(snapshot, "installed_software failed: " + str(e))
     return software
