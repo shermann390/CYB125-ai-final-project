@@ -311,10 +311,90 @@ def get_system_identity(snapshot):
 def get_password_policy(snapshot):
     info = {}
     try:
-        # TODO Milestone 3: parse `net accounts` and populate the 7 fields
-        # listed in the comment block above. Use run_command() to invoke
-        # the command, then walk its output line by line.
-        pass
+        # Run `net accounts` command to retrieve password and lockout policy settings.
+        # This command outputs lines like "Minimum password length      15"
+        output = run_command(["net", "accounts"])
+
+        # Split the output into individual lines so we can parse each one.
+        lines = output.split("\n")
+
+        # Walk through each line of output to find the policy settings we need.
+        for line in lines:
+            # Strip leading/trailing whitespace from the line so we can process it cleanly.
+            line = line.strip()
+
+            # Skip empty lines — they don't contain policy information.
+            if not line:
+                continue
+
+            # Split on the first colon only using split(":", 1).
+            # This avoids splitting on colons that might appear later in the line.
+            # Example: "Minimum password length : 15" splits into ["Minimum password length ", " 15"]
+            parts = line.split(":", 1)
+
+            # If there's no colon in the line, skip it (it's not a "Label: value" line).
+            if len(parts) != 2:
+                continue
+
+            # Extract the label (left side) and value (right side), trimming whitespace.
+            # The strip() call removes spaces around the colon.
+            label = parts[0].strip()
+            value_str = parts[1].strip()
+
+            # Now match each label to its corresponding field.
+            # NOTE: This is one approach — you could also use .lower() to make case-insensitive,
+            # or use regex to be more forgiving of exact spacing. These exact strings come from
+            # `net accounts` output and rarely change, so exact matching is safe here.
+
+            # Minimum password length: convert to int, None if "Never"
+            if label == "Minimum password length":
+                try:
+                    info["minimum_password_length"] = int(value_str)
+                except ValueError:
+                    info["minimum_password_length"] = None
+
+            # Minimum password age (days): convert to int, None if "Never"
+            elif label == "Minimum password age (days)":
+                try:
+                    info["minimum_password_age_days"] = int(value_str)
+                except ValueError:
+                    info["minimum_password_age_days"] = None
+
+            # Maximum password age (days): convert to int, None if "Never"
+            elif label == "Maximum password age (days)":
+                try:
+                    info["maximum_password_age_days"] = int(value_str)
+                except ValueError:
+                    info["maximum_password_age_days"] = None
+
+            # Length of password history maintained: convert to int, None if "Never"
+            elif label == "Length of password history maintained":
+                try:
+                    info["password_history_length"] = int(value_str)
+                except ValueError:
+                    info["password_history_length"] = None
+
+            # Lockout threshold: convert to int, None if "Never"
+            elif label == "Lockout threshold":
+                try:
+                    info["lockout_threshold"] = int(value_str)
+                except ValueError:
+                    info["lockout_threshold"] = None
+
+            # Lockout duration (minutes): convert to int, None if "Never"
+            elif label == "Lockout duration (minutes)":
+                try:
+                    info["lockout_duration_minutes"] = int(value_str)
+                except ValueError:
+                    info["lockout_duration_minutes"] = None
+
+            # Lockout observation window (minutes): convert to int, None if "Never"
+            elif label == "Lockout observation window (minutes)":
+                try:
+                    info["lockout_observation_window_minutes"] = int(value_str)
+                except ValueError:
+                    info["lockout_observation_window_minutes"] = None
+
     except Exception as e:
         add_warning(snapshot, "password_policy failed: " + str(e))
     return info
